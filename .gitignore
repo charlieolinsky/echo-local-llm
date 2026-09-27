@@ -1,0 +1,18 @@
+# Secrets
+.env
+
+# Build output
+/bin/
+*.exe
+
+# Go
+vendor/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local overrides
+config/models.local.yaml
