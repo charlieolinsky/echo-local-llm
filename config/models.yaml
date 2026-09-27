@@ -4,15 +4,22 @@
 listen: "0.0.0.0:4000"
 ollama_base: "http://127.0.0.1:11434"
 
+# Alias served as "default" / "active" on the API (TUI can change this)
+active: chat
+context_length: 8192
+
 # Prefer LOCAL_LLM_API_KEY in .env over putting a key here.
 # api_key: ""
 
 models:
+  # Smoke / tiny — fast, weak, good for plumbing tests
   tiny:
     upstream: "smollm2:135m"
 
-  # Add more aliases after: ollama pull <tag>
-  # chat:
-  #   upstream: "qwen3.5:9b"
-  # code:
-  #   upstream: "qwen2.5-coder:7b"
+  # Daily driver on M4 16GB — summarization, reasoning, general chat (~7GB)
+  chat:
+    upstream: "qwen3.5:9b"
+
+  # Same weights with a summarization-oriented system prompt (created via Modelfile)
+  summarize:
+    upstream: "summarize"

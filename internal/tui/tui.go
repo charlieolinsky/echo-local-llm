@@ -12,13 +12,13 @@ import (
 
 // Run opens the control dashboard. It does not start the gateway by itself;
 // use space to start or stop. The gateway is left running if you quit the TUI.
-func Run(cfg *config.Config, configPath, envPath string) error {
+func Run(store *config.Store, envPath string) error {
 	prevLog := log.Writer()
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(prevLog)
 
-	ctrl := newController(cfg, configPath, envPath)
-	p := tea.NewProgram(newModel(cfg, ctrl), tea.WithAltScreen())
+	ctrl := newController(store, envPath)
+	p := tea.NewProgram(newModel(store, ctrl), tea.WithAltScreen())
 	_, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("tui: %w", err)

@@ -20,7 +20,7 @@ import (
 
 // Server is the LAN-facing HTTP gateway.
 type Server struct {
-	cfg        *config.Config
+	store      *config.Store
 	gw         *proxy.Gateway
 	httpServer *http.Server
 	quiet      bool
@@ -35,26 +35,27 @@ func Quiet() Option {
 }
 
 // New wires auth + routes for the gateway.
-func New(cfg *config.Config, opts ...Option) (*Server, error) {
-	gw, err := proxy.New(cfg)
+func New(store *config.Store, opts ...Option) (*Server, error) {
+	gw, err := proxy.New(store)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{cfg: cfg, gw: gw}
+	s := &Server{store: store, gw: gw}
 	for _, opt := range opts {
 		opt(s)
 	}
 
+	snap := store.Snapshot()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", gw.Health)
 
-	protected := auth.Bearer(cfg.APIKey)(http.HandlerFunc(gw.ServeV1))
+	protected := auth.Bearer(snap.APIKey)(http.HandlerFunc(gw.ServeV1))
 	mux.Handle("/v1/", protected)
 	mux.Handle("/v1", protected)
 
 	s.httpServer = &http.Server{
-		Addr:              cfg.Listen,
+		Addr:              snap.Listen,
 		Handler:           logging(mux, s.quiet),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       0,
@@ -69,14 +70,15 @@ func New(cfg *config.Config, opts ...Option) (*Server, error) {
 
 // ListenAndServe starts the HTTP server (blocking).
 func (s *Server) ListenAndServe() error {
+	cfg := s.store.Snapshot()
 	activity.Record(activity.Event{
 		Kind:    "info",
-		Message: fmt.Sprintf("listening on %s  ollama %s  models %s", s.cfg.Listen, s.cfg.OllamaBase, strings.Join(s.cfg.AliasNames(), ",")),
+		Message: fmt.Sprintf("listening on %s  ollama %s  active %s  ctx %d", cfg.Listen, cfg.OllamaBase, cfg.Active, cfg.ContextLength),
 	})
 	if !s.quiet {
-		log.Printf("local-llm listening on http://%s", s.cfg.Listen)
-		log.Printf("proxying to Ollama at %s (loopback only recommended)", s.cfg.OllamaBase)
-		log.Printf("configured models: %v", s.cfg.AliasNames())
+		log.Printf("local-llm listening on http://%s", cfg.Listen)
+		log.Printf("proxying to Ollama at %s (loopback only recommended)", cfg.OllamaBase)
+		log.Printf("active model %s  context %d  aliases %v", cfg.Active, cfg.ContextLength, cfg.AliasNames())
 	}
 	return s.httpServer.ListenAndServe()
 }
@@ -165,10 +167,11 @@ func (w *statusWriter) Flush() {
 
 // Addr returns the configured listen address.
 func (s *Server) Addr() string {
-	return s.cfg.Listen
+	return s.store.Snapshot().Listen
 }
 
 // String helper for status output.
 func (s *Server) String() string {
-	return fmt.Sprintf("listen=%s ollama=%s models=%d", s.cfg.Listen, s.cfg.OllamaBase, len(s.cfg.Models))
+	cfg := s.store.Snapshot()
+	return fmt.Sprintf("listen=%s ollama=%s models=%d", cfg.Listen, cfg.OllamaBase, len(cfg.Models))
 }

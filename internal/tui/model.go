@@ -19,11 +19,12 @@ type panel int
 
 const (
 	panelLogs panel = iota
+	panelModels
 	panelChat
 )
 
 type model struct {
-	cfg    *config.Config
+	store  *config.Store
 	ctrl   *controller
 	client *apiClient
 	width  int
@@ -33,6 +34,10 @@ type model struct {
 	panel      panel
 	modelIdx   int
 	aliasNames []string
+	lib        []config.LibraryEntry
+	rows       []libRow
+	rowIdx     int
+	installed  []string
 
 	gatewayUp bool
 	ollamaUp  bool
@@ -46,6 +51,7 @@ type model struct {
 	logText  string
 	logSize  int64
 	follow   bool
+	listView viewport.Model
 
 	chatView viewport.Model
 	messages []chatMessage
@@ -55,11 +61,12 @@ type model struct {
 }
 
 type snapshotMsg struct {
-	gateway bool
-	ollama  bool
-	owned   bool
-	logs    string
-	size    int64
+	gateway   bool
+	ollama    bool
+	owned     bool
+	logs      string
+	size      int64
+	installed []string
 }
 
 type toggleDoneMsg struct {
@@ -74,7 +81,13 @@ type chatResultMsg struct {
 
 type tickMsg struct{}
 
-func newModel(cfg *config.Config, ctrl *controller) model {
+type modelOpMsg struct {
+	op  string
+	err error
+}
+
+func newModel(store *config.Store, ctrl *controller) model {
+	cfg := store.Snapshot()
 	ti := textinput.New()
 	ti.Placeholder = "optional test prompt…"
 	ti.CharLimit = 2000
@@ -88,16 +101,18 @@ func newModel(cfg *config.Config, ctrl *controller) model {
 	sp.Style = styleAccent
 
 	return model{
-		cfg:        cfg,
+		store:      store,
 		ctrl:       ctrl,
-		client:     newAPIClient(cfg),
+		client:     newAPIClient(&cfg),
 		panel:      panelLogs,
 		aliasNames: cfg.AliasNames(),
+		lib:        config.LoadLibrary(store.Path()),
 		follow:     true,
 		input:      ti,
 		spinner:    sp,
 		status:     "idle",
 		logView:    viewport.New(80, 10),
+		listView:   viewport.New(80, 10),
 		chatView:   viewport.New(80, 6),
 	}
 }
@@ -113,12 +128,14 @@ func scheduleTick() tea.Cmd {
 func takeSnapshot(ctrl *controller) tea.Cmd {
 	return func() tea.Msg {
 		logs, _ := activity.TailFile(activity.DefaultPath(), 48<<10)
+		tags, _ := listOllamaTags(ctrl.snap().OllamaBase)
 		return snapshotMsg{
-			gateway: ctrl.gatewayUp(),
-			ollama:  ctrl.ollamaUp(),
-			owned:   ctrl.owned(),
-			logs:    logs,
-			size:    activity.FileSize(activity.DefaultPath()),
+			gateway:   ctrl.gatewayUp(),
+			ollama:    ctrl.ollamaUp(),
+			owned:     ctrl.owned(),
+			logs:      logs,
+			size:      activity.FileSize(activity.DefaultPath()),
+			installed: tags,
 		}
 	}
 }
@@ -150,6 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.layout()
 		m.redrawLogs()
+		m.redrawList()
 		m.redrawChat()
 		return m, nil
 
@@ -165,6 +183,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gatewayUp = msg.gateway
 		m.ollamaUp = msg.ollama
 		m.owned = msg.owned
+		if msg.installed != nil {
+			m.installed = msg.installed
+			m.rows = buildLibraryRows(m.lib, m.installed, m.store.Snapshot())
+			if m.rowIdx >= len(m.rows) && len(m.rows) > 0 {
+				m.rowIdx = len(m.rows) - 1
+			}
+			m.redrawList()
+		}
 		if !m.busy {
 			switch {
 			case m.gatewayUp && m.ollamaUp:
@@ -184,6 +210,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, nil
+
+	case modelOpMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			m.note(msg.err.Error())
+		} else {
+			m.note(msg.op)
+			m.status = "ready"
+		}
+		m.aliasNames = m.store.Snapshot().AliasNames()
+		return m, takeSnapshot(m.ctrl)
 
 	case toggleDoneMsg:
 		m.busy = false
@@ -262,16 +300,42 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.note("starting gateway…")
 		return m, tea.Batch(m.spinner.Tick, runToggle(m.ctrl, true))
 	case "tab":
-		if m.panel == panelLogs {
+		switch m.panel {
+		case panelLogs:
+			m.panel = panelModels
+			m.input.Blur()
+		case panelModels:
 			m.panel = panelChat
 			m.input.Focus()
-		} else {
+		default:
 			m.panel = panelLogs
 			m.input.Blur()
 		}
 		m.layout()
 		m.redrawLogs()
+		m.redrawList()
 		m.redrawChat()
+		return m, nil
+	case "1":
+		if typing {
+			break
+		}
+		return m.setPanel(panelLogs)
+	case "2":
+		if typing {
+			break
+		}
+		return m.setPanel(panelModels)
+	case "3":
+		if typing {
+			break
+		}
+		return m.setPanel(panelChat)
+	case "?":
+		if typing {
+			break
+		}
+		// help is always visible; stay put
 		return m, nil
 	case "k", "K":
 		if !typing || m.input.Value() == "" {
@@ -287,19 +351,48 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "up":
-		if m.panel == panelChat && !m.input.Focused() && len(m.aliasNames) > 0 {
-			m.modelIdx--
-			if m.modelIdx < 0 {
-				m.modelIdx = len(m.aliasNames) - 1
+		if m.panel == panelModels && len(m.rows) > 0 {
+			m.rowIdx--
+			if m.rowIdx < 0 {
+				m.rowIdx = len(m.rows) - 1
 			}
+			m.redrawList()
 			return m, nil
 		}
 	case "down":
-		if m.panel == panelChat && !m.input.Focused() && len(m.aliasNames) > 0 {
-			m.modelIdx = (m.modelIdx + 1) % len(m.aliasNames)
+		if m.panel == panelModels && len(m.rows) > 0 {
+			m.rowIdx = (m.rowIdx + 1) % len(m.rows)
+			m.redrawList()
 			return m, nil
 		}
+	case "i":
+		if typing {
+			break
+		}
+		if m.panel == panelModels {
+			return m.startInstall()
+		}
+	case "x":
+		if typing {
+			break
+		}
+		if m.panel == panelModels {
+			return m.startUninstall()
+		}
+	case "[":
+		if typing {
+			break
+		}
+		return m.bumpContext(-1)
+	case "]":
+		if typing {
+			break
+		}
+		return m.bumpContext(1)
 	case "enter":
+		if m.panel == panelModels {
+			return m.setActiveRow()
+		}
 		if m.panel != panelChat || m.sending {
 			return m, nil
 		}
@@ -312,7 +405,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.redrawChat()
 			return m, nil
 		}
-		alias := m.aliasNames[m.modelIdx]
+		alias := m.store.Snapshot().Active
+		if alias == "" && len(m.aliasNames) > 0 {
+			alias = m.aliasNames[0]
+		}
 		m.messages = append(m.messages, chatMessage{Role: "user", Content: prompt})
 		m.input.SetValue("")
 		m.sending = true
@@ -325,12 +421,31 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	}
+	if m.panel == panelModels {
+		var cmd tea.Cmd
+		m.listView, cmd = m.listView.Update(msg)
+		return m, cmd
+	}
 	if key == "pgup" || key == "pgdown" || key == "up" || key == "down" || key == "home" || key == "end" {
 		m.follow = false
 	}
 	var cmd tea.Cmd
 	m.logView, cmd = m.logView.Update(msg)
 	return m, cmd
+}
+
+func (m model) setPanel(p panel) (tea.Model, tea.Cmd) {
+	m.panel = p
+	if p == panelChat {
+		m.input.Focus()
+	} else {
+		m.input.Blur()
+	}
+	m.layout()
+	m.redrawLogs()
+	m.redrawList()
+	m.redrawChat()
+	return m, nil
 }
 
 func (m *model) note(s string) {
@@ -351,10 +466,10 @@ func (m *model) innerWidth() int {
 }
 
 func (m *model) chromeHeight() int {
-	// title, status, url, models, rule, help  = 6
-	h := 6
+	// header + meta + tab row (2 lines with underline) + help
+	h := 5
 	if m.panel == panelChat {
-		h += 2 // input + extra rule
+		h += 1
 	}
 	return h
 }
@@ -362,30 +477,20 @@ func (m *model) chromeHeight() int {
 func (m *model) layout() {
 	inner := m.innerWidth()
 	body := m.height - m.chromeHeight()
-	if body < 4 {
-		body = 4
-	}
-	if m.panel == panelChat {
-		chatH := body / 3
-		if chatH < 4 {
-			chatH = 4
-		}
-		if chatH > body-4 {
-			chatH = body - 4
-		}
-		m.logView.Width = inner
-		m.logView.Height = body - chatH
-		m.chatView.Width = inner
-		m.chatView.Height = chatH
-		iw := inner - 2
-		if iw < 8 {
-			iw = 8
-		}
-		m.input.Width = iw
-		return
+	if body < 3 {
+		body = 3
 	}
 	m.logView.Width = inner
 	m.logView.Height = body
+	m.listView.Width = inner
+	m.listView.Height = body
+	m.chatView.Width = inner
+	m.chatView.Height = body
+	iw := inner - 2
+	if iw < 8 {
+		iw = 8
+	}
+	m.input.Width = iw
 }
 
 func (m *model) redrawLogs() {
@@ -400,7 +505,12 @@ func (m *model) redrawLogs() {
 	if text == "" && len(m.notices) == 0 {
 		b.WriteString(styleMuted.Render("No activity yet. Press space to start the gateway."))
 	} else if text != "" {
-		b.WriteString(text)
+		for i, line := range strings.Split(text, "\n") {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(styleLogLine(line))
+		}
 	}
 	atBottom := m.logView.AtBottom()
 	m.logView.SetContent(b.String())
@@ -425,11 +535,11 @@ func (m *model) redrawChat() {
 			b.WriteString(styleYou.Render("you  "))
 			b.WriteString(wrap.Render(msg.Content))
 		case "assistant":
-			name := "model"
-			if len(m.aliasNames) > 0 {
-				name = m.aliasNames[m.modelIdx]
+			name := m.store.Snapshot().Active
+			if name == "" {
+				name = "model"
 			}
-			b.WriteString(styleBot.Render(name+"  "))
+			b.WriteString(styleBot.Render(name + "  "))
 			b.WriteString(wrap.Render(msg.Content))
 		case "error":
 			b.WriteString(styleErr.Render("error  " + msg.Content))
@@ -442,37 +552,69 @@ func (m *model) redrawChat() {
 	m.chatView.GotoBottom()
 }
 
+func (m *model) redrawList() {
+	inner := m.innerWidth()
+	m.listView.SetContent(m.renderLibrary(inner))
+	// Keep the selected row in view.
+	if m.rowIdx >= 0 {
+		m.listView.SetYOffset(max(0, m.rowIdx-1))
+	}
+}
+
 func (m model) View() string {
 	if !m.ready {
 		return "starting…"
 	}
 	inner := m.innerWidth()
-	rule := styleMuted.Render(strings.Repeat("─", inner))
+	var body string
+	switch m.panel {
+	case panelModels:
+		body = m.listView.View()
+	case panelChat:
+		body = m.chatView.View()
+	default:
+		body = m.logView.View()
+	}
 
 	parts := []string{
-		m.renderTitle(inner),
-		m.renderStatus(inner),
-		m.renderURL(inner),
-		m.renderModels(inner),
-		rule,
-		m.logView.View(),
+		m.renderHeader(inner),
+		m.renderMeta(inner),
+		m.renderTabs(inner),
+		body,
 	}
 	if m.panel == panelChat {
-		alias := "—"
-		if len(m.aliasNames) > 0 {
-			alias = m.aliasNames[m.modelIdx]
-		}
-		parts = append(parts, rule, styleMuted.Render("test · "+alias), m.chatView.View(), m.input.View())
+		parts = append(parts, m.input.View())
 	}
 	parts = append(parts, m.renderHelp(inner))
 
-	return styleApp.MaxWidth(m.width).MaxHeight(m.height).Render(
-		lipgloss.JoinVertical(lipgloss.Left, parts...),
-	)
+	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	need := m.height
+	if got := lipgloss.Height(frame); got < need {
+		frame += strings.Repeat("\n", need-got)
+	}
+	return styleApp.MaxHeight(m.height).Render(frame)
 }
 
-func (m model) renderTitle(inner int) string {
-	left := styleTitle.Render("local-llm")
+func (m model) renderHeader(inner int) string {
+	dot := func(up bool) string {
+		if up {
+			return styleOk.Render("●")
+		}
+		return styleBad.Render("●")
+	}
+	ol := dot(m.ollamaUp)
+	if !m.ollamaUp {
+		ol = styleWarn.Render("●")
+	}
+	src := ""
+	if m.gatewayUp && m.owned {
+		src = styleMuted.Render("  local")
+	} else if m.gatewayUp {
+		src = styleMuted.Render("  ext")
+	}
+	left := styleTitle.Render("local-llm") + "  " +
+		dot(m.gatewayUp) + styleMuted.Render(" gw  ") +
+		ol + styleMuted.Render(" ollama") + src
 	right := m.statusText()
 	gap := inner - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -486,82 +628,220 @@ func (m model) statusText() string {
 		return m.spinner.View() + " " + styleMuted.Render(m.status)
 	}
 	switch {
-	case strings.Contains(m.status, "stopped") || m.status == "idle":
-		return styleMuted.Render(m.status)
-	case strings.Contains(m.status, "down") || strings.Contains(m.status, "error"):
-		return styleBad.Render(m.status)
 	case m.status == "running":
 		return styleOk.Render(m.status)
+	case strings.Contains(m.status, "down") || strings.Contains(m.status, "error"):
+		return styleBad.Render(m.status)
+	case m.status == "stopped" || m.status == "idle":
+		return styleMuted.Render(m.status)
 	default:
 		return styleMuted.Render(m.status)
 	}
 }
 
-func (m model) renderStatus(inner int) string {
-	gw := styleBad.Render("down")
-	if m.gatewayUp {
-		gw = styleOk.Render("up")
-	}
-	ol := styleBad.Render("down")
-	if m.ollamaUp {
-		ol = styleOk.Render("up")
-	} else {
-		ol = styleWarn.Render("down")
-	}
-	src := styleMuted.Render("external")
-	if !m.gatewayUp {
-		src = styleMuted.Render("—")
-	} else if m.owned {
-		src = styleMuted.Render("started here")
-	}
-	line := fmt.Sprintf("%s %s  %s %s  %s",
-		styleMuted.Render("gateway"), gw,
-		styleMuted.Render("ollama"), ol,
-		src,
-	)
-	return lipgloss.NewStyle().MaxWidth(inner).Render(line)
-}
-
-func (m model) renderURL(inner int) string {
-	port := listenPort(m.cfg.Listen)
+func (m model) renderMeta(inner int) string {
+	cfg := m.store.Snapshot()
+	port := listenPort(cfg.Listen)
 	lanURL := "http://<lan-ip>:" + port + "/v1"
 	if ip := lanIPv4(); ip != "" {
 		lanURL = "http://" + ip + ":" + port + "/v1"
 	}
-	key := maskKey(m.cfg.APIKey)
+	key := maskKey(cfg.APIKey)
 	if m.showKey {
-		key = m.cfg.APIKey
+		key = cfg.APIKey
 	}
-	line := styleAccent.Render(lanURL) + "  " + styleMuted.Render("key") + " " + styleMuted.Render(key)
+	line := styleAccent.Render(lanURL) +
+		styleMuted.Render("  ·  ") + styleMuted.Render(key) +
+		styleMuted.Render("  ·  ") + styleAccent.Render(cfg.Active) +
+		styleMuted.Render(fmt.Sprintf("  ctx %d", cfg.ContextLength))
 	return lipgloss.NewStyle().MaxWidth(inner).Render(line)
 }
 
-func (m model) renderModels(inner int) string {
-	if len(m.aliasNames) == 0 {
-		return styleMuted.Render("no model aliases")
+func (m model) renderTabs(inner int) string {
+	tabs := []struct {
+		id    panel
+		label string
+	}{
+		{panelLogs, "1 logs"},
+		{panelModels, "2 models"},
+		{panelChat, "3 test"},
 	}
 	var parts []string
-	for i, name := range m.aliasNames {
-		up := m.cfg.Models[name].Upstream
-		s := name + "→" + up
-		if i == m.modelIdx {
-			s = styleAccent.Render(s)
-		} else {
-			s = styleMuted.Render(s)
+	for _, t := range tabs {
+		st := styleTab
+		if t.id == m.panel {
+			st = styleTabActive
 		}
-		parts = append(parts, s)
+		parts = append(parts, st.Render(t.label))
 	}
-	return lipgloss.NewStyle().MaxWidth(inner).Render(strings.Join(parts, "  "))
+	row := lipgloss.JoinHorizontal(lipgloss.Bottom, parts...)
+	gapW := inner - lipgloss.Width(row)
+	if gapW < 0 {
+		gapW = 0
+	}
+	gap := styleTabGap.Render(strings.Repeat(" ", gapW))
+	return lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
+}
+
+func (m model) renderLibrary(inner int) string {
+	var b strings.Builder
+	header := fmt.Sprintf("  %-8s %-22s %-8s %-10s  %s", "alias", "tag", "size", "status", "role")
+	b.WriteString(styleMuted.Render(header))
+	b.WriteString("\n")
+	if len(m.rows) == 0 {
+		b.WriteString(styleMuted.Render("  catalog empty"))
+		return b.String()
+	}
+	for i, row := range m.rows {
+		status := "available"
+		stStatus := styleMuted
+		if row.Installed {
+			status = "installed"
+			stStatus = styleOk
+		}
+		if row.Active {
+			status = "active"
+			stStatus = styleAccent
+		}
+		mark := " "
+		if i == m.rowIdx {
+			mark = "▸"
+		}
+		plain := fmt.Sprintf("%s %-8s %-22s %-8s ", mark, row.Alias, truncate(row.Tag, 22), row.Size)
+		line := plain + stStatus.Render(fmt.Sprintf("%-10s", status)) + "  " + styleMuted.Render(row.Role)
+		if i == m.rowIdx {
+			line = styleRowCursor.Width(inner).Render(
+				fmt.Sprintf("%s %-8s %-22s %-8s %-10s  %s", mark, row.Alias, truncate(row.Tag, 22), row.Size, status, row.Role),
+			)
+		}
+		b.WriteString(lipgloss.NewStyle().MaxWidth(inner).Render(line))
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m model) renderHelp(inner int) string {
-	follow := "follow"
-	if m.follow {
-		follow = "following"
-	}
-	help := "space start/stop  tab logs/test  f " + follow + "  k key  q quit"
-	if m.panel == panelChat {
-		help = "enter send  tab logs  space start/stop  q quit"
+	help := "space start/stop   tab/1–3 pane   f follow   k key   q quit"
+	switch m.panel {
+	case panelModels:
+		help = "↑↓ move   enter active   i install   x remove   [ ] ctx   tab pane"
+	case panelChat:
+		help = "enter send   tab pane   space start/stop   q quit"
 	}
 	return styleHelp.MaxWidth(inner).Render(help)
+}
+
+func styleLogLine(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return styleMuted.Render(line)
+	}
+	ts := styleMuted.Render(fields[0])
+	rest := strings.TrimPrefix(line, fields[0])
+	switch {
+	case fields[1] == "200" || fields[1] == "info":
+		return ts + styleText.Render(rest)
+	case fields[1] == "tui":
+		return ts + styleMuted.Render(rest)
+	case len(fields[1]) == 3 && fields[1][0] == '4':
+		return ts + styleWarn.Render(rest)
+	case len(fields[1]) == 3 && fields[1][0] == '5':
+		return ts + styleErr.Render(rest)
+	default:
+		return ts + styleText.Render(rest)
+	}
+}
+
+func (m model) startInstall() (tea.Model, tea.Cmd) {
+	if m.busy || len(m.rows) == 0 {
+		return m, nil
+	}
+	row := m.rows[m.rowIdx]
+	if row.Installed {
+		m.note(row.Alias + " already installed")
+		return m, nil
+	}
+	if !m.ollamaUp {
+		m.note("ollama is down")
+		return m, nil
+	}
+	m.busy = true
+	m.status = "installing " + row.Tag
+	m.note("pulling " + row.Tag + " …")
+	store := m.store
+	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		if err := ollamaPull(row.Tag); err != nil {
+			return modelOpMsg{op: "install", err: err}
+		}
+		if err := store.UpsertModel(row.Alias, row.Tag); err != nil {
+			return modelOpMsg{op: "install", err: err}
+		}
+		return modelOpMsg{op: "installed " + row.Alias, err: nil}
+	})
+}
+
+func (m model) startUninstall() (tea.Model, tea.Cmd) {
+	if m.busy || len(m.rows) == 0 {
+		return m, nil
+	}
+	row := m.rows[m.rowIdx]
+	if !row.Installed {
+		m.note(row.Alias + " is not installed")
+		return m, nil
+	}
+	cfg := m.store.Snapshot()
+	if len(cfg.Models) <= 1 && cfg.Models[row.Alias].Upstream != "" {
+		m.note("cannot remove the last alias")
+		return m, nil
+	}
+	m.busy = true
+	m.status = "removing " + row.Tag
+	m.note("removing " + row.Tag + " …")
+	store := m.store
+	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+		_ = store.RemoveModel(row.Alias)
+		if err := ollamaRemove(row.Tag); err != nil {
+			return modelOpMsg{op: "remove", err: err}
+		}
+		return modelOpMsg{op: "removed " + row.Alias, err: nil}
+	})
+}
+
+func (m model) setActiveRow() (tea.Model, tea.Cmd) {
+	if len(m.rows) == 0 {
+		return m, nil
+	}
+	row := m.rows[m.rowIdx]
+	if !row.Installed {
+		m.note("install " + row.Alias + " first (i)")
+		return m, nil
+	}
+	if err := m.store.SetActive(row.Alias); err != nil {
+		// Alias might be in library but not yet in models.yaml — add then activate.
+		if err := m.store.UpsertModel(row.Alias, row.Tag); err != nil {
+			m.note(err.Error())
+			return m, nil
+		}
+		if err := m.store.SetActive(row.Alias); err != nil {
+			m.note(err.Error())
+			return m, nil
+		}
+	}
+	m.aliasNames = m.store.Snapshot().AliasNames()
+	m.note("active model → " + row.Alias)
+	m.rows = buildLibraryRows(m.lib, m.installed, m.store.Snapshot())
+	m.redrawList()
+	return m, nil
+}
+
+func (m model) bumpContext(dir int) (tea.Model, tea.Cmd) {
+	cfg := m.store.Snapshot()
+	next := nextContext(cfg.ContextLength, dir)
+	if err := m.store.SetContextLength(next); err != nil {
+		m.note(err.Error())
+		return m, nil
+	}
+	m.note(fmt.Sprintf("context length → %d", next))
+	m.redrawList()
+	return m, nil
 }

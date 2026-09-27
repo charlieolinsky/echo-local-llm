@@ -3,24 +3,20 @@
 
 listen: "0.0.0.0:4000"
 ollama_base: "http://127.0.0.1:11434"
+active: chat
+context_length: 8192
 
 models:
-  # Smoke / tiny
   tiny:
     upstream: "smollm2:135m"
 
-  # Fast helpers
-  fast:
-    upstream: "llama3.2:3b"
-
-  # Daily chat (sweet spot on 16 GB)
+  # Best balance on M4 16GB (~7GB) — summarization + reasoning
   chat:
     upstream: "qwen3.5:9b"
 
-  # Coding
-  code:
-    upstream: "qwen2.5-coder:7b"
+  summarize:
+    upstream: "summarize"
 
-  # Quality stretch (keep context modest)
-  # quality:
-  #   upstream: "gemma4:12b"
+  # Coding (already on this machine if pulled earlier)
+  # code:
+  #   upstream: "qwen2.5-coder:7b"

@@ -7,8 +7,10 @@ var (
 	colorMuted  = lipgloss.Color("243")
 	colorOk     = lipgloss.Color("114")
 	colorBad    = lipgloss.Color("203")
-	colorWarn  = lipgloss.Color("215")
-	colorTitle = lipgloss.Color("231")
+	colorWarn   = lipgloss.Color("215")
+	colorTitle  = lipgloss.Color("231")
+	colorSubtle = lipgloss.Color("236")
+	colorText   = lipgloss.Color("252")
 
 	styleApp = lipgloss.NewStyle().Padding(0, 1)
 
@@ -17,20 +19,35 @@ var (
 			Foreground(colorTitle)
 
 	styleAccent = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleMuted  = lipgloss.NewStyle().Foreground(colorMuted)
+	styleOk     = lipgloss.NewStyle().Foreground(colorOk).Bold(true)
+	styleBad    = lipgloss.NewStyle().Foreground(colorBad).Bold(true)
+	styleWarn   = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
+	styleHelp   = lipgloss.NewStyle().Foreground(colorMuted)
+	styleYou    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleBot    = lipgloss.NewStyle().Foreground(colorOk).Bold(true)
+	styleErr    = lipgloss.NewStyle().Foreground(colorBad)
+	styleText   = lipgloss.NewStyle().Foreground(colorText)
 
-	styleMuted = lipgloss.NewStyle().Foreground(colorMuted)
+	styleTab = lipgloss.NewStyle().
+			Foreground(colorMuted).
+			Border(lipgloss.NormalBorder(), false, false, true, false).
+			BorderForeground(colorSubtle).
+			Padding(0, 1)
 
-	styleOk = lipgloss.NewStyle().Foreground(colorOk).Bold(true)
+	styleTabActive = lipgloss.NewStyle().
+			Foreground(colorTitle).
+			Bold(true).
+			Border(lipgloss.NormalBorder(), false, false, true, false).
+			BorderForeground(colorAccent).
+			Padding(0, 1)
 
-	styleBad = lipgloss.NewStyle().Foreground(colorBad).Bold(true)
+	styleTabGap = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, true, false).
+			BorderForeground(colorSubtle)
 
-	styleWarn = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
-
-	styleHelp = lipgloss.NewStyle().Foreground(colorMuted)
-
-	styleYou = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-
-	styleBot = lipgloss.NewStyle().Foreground(colorOk).Bold(true)
-
-	styleErr = lipgloss.NewStyle().Foreground(colorBad)
+	styleRowCursor = lipgloss.NewStyle().
+			Foreground(colorTitle).
+			Background(lipgloss.Color("237")).
+			Bold(true)
 )

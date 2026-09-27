@@ -1,0 +1,37 @@
+# Installable catalog for the TUI (M4 16GB). Pulling is opt-in.
+models:
+  - alias: tiny
+    tag: smollm2:135m
+    size: 270 MB
+    fit: easy
+    role: Smoke test
+  - alias: fast
+    tag: llama3.2:3b
+    size: ~2 GB
+    fit: easy
+    role: Instant answers
+  - alias: small
+    tag: qwen3.5:4b
+    size: ~3.5 GB
+    fit: easy
+    role: Small Qwen helper
+  - alias: chat
+    tag: qwen3.5:9b
+    size: 6.6 GB
+    fit: easy
+    role: Daily driver — summary & reasoning
+  - alias: code
+    tag: qwen2.5-coder:7b
+    size: ~4.7 GB
+    fit: easy
+    role: Coding
+  - alias: llama
+    tag: llama3.1:8b
+    size: ~4.9 GB
+    fit: easy
+    role: General Llama 3.1
+  - alias: gemma
+    tag: gemma2:9b
+    size: ~5.5 GB
+    fit: easy
+    role: Gemma 2 writing

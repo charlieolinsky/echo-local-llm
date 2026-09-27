@@ -2,7 +2,15 @@
 
 Use Modelfiles to create **named presets** on top of the same weights (system prompt, temperature, context).
 
-Example — terse chat style:
+## Included: `summarize`
+
+```bash
+ollama create summarize -f modelfiles/summarize.Modelfile
+```
+
+Wired in `config/models.yaml` as alias `summarize` (same Qwen 3.5 9B weights, summarization system prompt).
+
+## Custom preset example
 
 ```bash
 cat > modelfiles/chat-terse.Modelfile <<'EOF'
@@ -21,4 +29,4 @@ Then add to `config/models.yaml`:
     upstream: "chat-terse"
 ```
 
-Restart the gateway (`make run` or reload launchd). Clients call `"model": "terse"`.
+Restart the gateway. Clients call `"model": "terse"`.

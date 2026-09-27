@@ -40,6 +40,13 @@ models:
 	if !ok || up != "qwen3.5:9b" {
 		t.Fatalf("Resolve(upstream): %q %v", up, ok)
 	}
+	if cfg.Active != "chat" {
+		t.Fatalf("default active: %q", cfg.Active)
+	}
+	up, ok = cfg.Resolve("default")
+	if !ok || up != "qwen3.5:9b" {
+		t.Fatalf("Resolve(default): %q %v", up, ok)
+	}
 	if _, ok := cfg.Resolve("missing"); ok {
 		t.Fatal("expected missing model to fail")
 	}
@@ -60,5 +67,38 @@ func TestLoadRequiresAPIKey(t *testing.T) {
 	t.Setenv(EnvAPIKey, "")
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error without API key")
+	}
+}
+
+func TestStoreActiveAndContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.yaml")
+	_ = os.WriteFile(path, []byte(`
+listen: "127.0.0.1:4000"
+ollama_base: "http://127.0.0.1:11434"
+models:
+  tiny:
+    upstream: "smollm2:135m"
+  chat:
+    upstream: "qwen3.5:9b"
+`), 0o644)
+	t.Setenv(EnvAPIKey, "test-secret-key")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetActive("tiny"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetContextLength(4096); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := st2.Snapshot()
+	if snap.Active != "tiny" || snap.ContextLength != 4096 {
+		t.Fatalf("saved state: %+v", snap)
 	}
 }

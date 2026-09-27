@@ -17,14 +17,23 @@ import (
 // Gateway reverse-proxies OpenAI-compatible /v1 traffic to Ollama,
 // rewriting configured model aliases to upstream tags.
 type Gateway struct {
-	cfg    *config.Config
+	store  *config.Store
 	proxy  *httputil.ReverseProxy
 	client *http.Client
 }
 
-// New builds a Gateway pointing at cfg.OllamaBase.
-func New(cfg *config.Config) (*Gateway, error) {
-	target, err := url.Parse(cfg.OllamaBase)
+func (g *Gateway) cfg() config.Config {
+	if g.store == nil {
+		return config.Config{}
+	}
+	_ = g.store.Reload()
+	return g.store.Snapshot()
+}
+
+// New builds a Gateway pointing at the store's Ollama base.
+func New(store *config.Store) (*Gateway, error) {
+	snap := store.Snapshot()
+	target, err := url.Parse(snap.OllamaBase)
 	if err != nil {
 		return nil, fmt.Errorf("parse ollama_base: %w", err)
 	}
@@ -44,7 +53,7 @@ func New(cfg *config.Config) (*Gateway, error) {
 	rp.FlushInterval = 50 * time.Millisecond
 
 	return &Gateway{
-		cfg:   cfg,
+		store: store,
 		proxy: rp,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
@@ -55,7 +64,8 @@ func New(cfg *config.Config) (*Gateway, error) {
 // Health reports whether Ollama is reachable.
 func (g *Gateway) Health(w http.ResponseWriter, r *http.Request) {
 	ollamaOK := false
-	resp, err := g.client.Get(g.cfg.OllamaBase + "/api/tags")
+	cfg := g.cfg()
+	resp, err := g.client.Get(cfg.OllamaBase + "/api/tags")
 	if err == nil {
 		_ = resp.Body.Close()
 		ollamaOK = resp.StatusCode >= 200 && resp.StatusCode < 300
@@ -70,8 +80,8 @@ func (g *Gateway) Health(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `{"status":%q,"ollama":%t,"listen":%q,"models":%d}`,
-		state, ollamaOK, g.cfg.Listen, len(g.cfg.Models))
+	_, _ = fmt.Fprintf(w, `{"status":%q,"ollama":%t,"listen":%q,"models":%d,"active":%q,"context_length":%d}`,
+		state, ollamaOK, cfg.Listen, len(cfg.Models), cfg.Active, cfg.ContextLength)
 }
 
 // ListModels returns OpenAI-style /v1/models for configured aliases only.
@@ -87,9 +97,11 @@ func (g *Gateway) ListModels(w http.ResponseWriter, r *http.Request) {
 		Data   []modelObj `json:"data"`
 	}
 
+	cfg := g.cfg()
 	now := time.Now().Unix()
-	out := listResp{Object: "list", Data: make([]modelObj, 0, len(g.cfg.Models))}
-	for name := range g.cfg.Models {
+	out := listResp{Object: "list", Data: make([]modelObj, 0, len(cfg.Models)+1)}
+	out.Data = append(out.Data, modelObj{ID: "default", Object: "model", Created: now, OwnedBy: "local-llm"})
+	for name := range cfg.Models {
 		out.Data = append(out.Data, modelObj{
 			ID:      name,
 			Object:  "model",
@@ -106,6 +118,10 @@ func (g *Gateway) ListModels(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) ServeV1(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet && (r.URL.Path == "/v1/models" || r.URL.Path == "/v1/models/") {
 		g.ListModels(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && (r.URL.Path == "/v1/chat/completions" || r.URL.Path == "/v1/chat/completions/") {
+		g.handleChatCompletions(w, r)
 		return
 	}
 
@@ -169,9 +185,10 @@ func (g *Gateway) rewriteModel(r *http.Request) error {
 		return nil
 	}
 
-	upstream, ok := g.cfg.Resolve(modelName)
+	cfg := g.cfg()
+	upstream, ok := cfg.Resolve(modelName)
 	if !ok {
-		aliases := strings.Join(g.cfg.AliasNames(), ", ")
+		aliases := strings.Join(cfg.AliasNames(), ", ")
 		return fmt.Errorf("unknown model %q; configured aliases: %s", modelName, aliases)
 	}
 

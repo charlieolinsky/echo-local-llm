@@ -52,7 +52,7 @@ Usage:
   local-llm status [--config path] [--env-file path]
   local-llm version
 
-  tui (alias: ui)  Dashboard: start/stop gateway, live logs, optional test chat
+  tui (alias: ui)  Dashboard: start/stop, install models, live logs
   serve            Headless gateway for LAN / launchd
 
 Environment:
@@ -70,13 +70,13 @@ func runTUI(args []string) int {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 
-	cfg, err := config.Load(*cfgPath)
+	store, err := config.Open(*cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		return 1
 	}
 
-	if err := tui.Run(cfg, *cfgPath, *envFile); err != nil {
+	if err := tui.Run(store, *envFile); err != nil {
 		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
 		return 1
 	}
@@ -93,13 +93,13 @@ func runServe(args []string) int {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 
-	cfg, err := config.Load(*cfgPath)
+	store, err := config.Open(*cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		return 1
 	}
 
-	srv, err := server.New(cfg)
+	srv, err := server.New(store)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
 		return 1
@@ -142,7 +142,6 @@ func runStatus(args []string) int {
 		return 1
 	}
 
-	// Probe gateway health on localhost, rewriting 0.0.0.0 → 127.0.0.1 for the client.
 	host := cfg.Listen
 	if len(host) >= 7 && host[:7] == "0.0.0.0" {
 		host = "127.0.0.1" + host[7:]

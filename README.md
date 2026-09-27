@@ -58,7 +58,7 @@ OpenAI SDKs: set `base_url` / `baseURL` to `http://<mac-ip>:4000/v1` and `api_ke
 |---------|---------|
 | `make setup` / `./scripts/setup.sh` | Bootstrap deps, key, tiny model, binary |
 | `make build` | Build `bin/local-llm` |
-| `make tui` | Dashboard — start/stop gateway, live logs |
+| `make tui` | Dashboard — start/stop, models, logs |
 | `make run` | Headless gateway (LAN / launchd) |
 | `make status` | Probe `/health` |
 | `make allow-firewall` | Allow LAN access through macOS firewall |
@@ -73,12 +73,19 @@ The dashboard does **not** start the gateway until you press space. Quitting the
 | Key | Action |
 |-----|--------|
 | `space` | Start or stop the gateway |
-| `tab` | Logs ↔ optional test chat |
+| `tab` | Logs → **Models** → test chat |
+| `↑` `↓` | Select a catalog model |
+| `enter` | Set the **active** API model |
+| `i` | Install (ollama pull) |
+| `x` | Uninstall |
+| `[` `]` | Context length (2k–16k) |
 | `f` | Toggle log follow |
 | `k` | Reveal / hide API key |
 | `q` / `ctrl+c` | Quit the dashboard |
 
-Activity is also written to `~/Library/Logs/local-llm.log`.
+Clients can send `"model": "default"` (or `"active"`) to use whatever is selected. Installed aliases still work by name.
+
+Activity is also written to `~/Library/Logs/local-llm.log`. The catalog lives in `config/library.yaml` (nothing is pulled until you press `i`).
 
 ## Add another model config
 

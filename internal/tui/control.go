@@ -16,20 +16,23 @@ import (
 )
 
 type controller struct {
-	cfg        *config.Config
-	configPath string
-	envPath    string
+	store   *config.Store
+	envPath string
 
 	mu    sync.Mutex
 	child *exec.Cmd
 }
 
-func newController(cfg *config.Config, configPath, envPath string) *controller {
-	return &controller{cfg: cfg, configPath: configPath, envPath: envPath}
+func newController(store *config.Store, envPath string) *controller {
+	return &controller{store: store, envPath: envPath}
+}
+
+func (c *controller) snap() config.Config {
+	return c.store.Snapshot()
 }
 
 func (c *controller) listenHostPort() string {
-	addr := c.cfg.Listen
+	addr := c.snap().Listen
 	if strings.HasPrefix(addr, "0.0.0.0") {
 		return "127.0.0.1" + strings.TrimPrefix(addr, "0.0.0.0")
 	}
@@ -52,7 +55,7 @@ func (c *controller) gatewayUp() bool {
 }
 
 func (c *controller) ollamaUp() bool {
-	base := strings.TrimPrefix(strings.TrimPrefix(c.cfg.OllamaBase, "http://"), "https://")
+	base := strings.TrimPrefix(strings.TrimPrefix(c.snap().OllamaBase, "http://"), "https://")
 	base = strings.TrimRight(base, "/")
 	conn, err := net.DialTimeout("tcp", base, 250*time.Millisecond)
 	if err != nil {
@@ -70,7 +73,7 @@ func (c *controller) owned() bool {
 
 func (c *controller) start() error {
 	if c.gatewayUp() {
-		return fmt.Errorf("already listening on %s", c.cfg.Listen)
+		return fmt.Errorf("already listening on %s", c.snap().Listen)
 	}
 
 	exe, err := os.Executable()
@@ -78,8 +81,8 @@ func (c *controller) start() error {
 		return err
 	}
 	args := []string{"serve"}
-	if c.configPath != "" {
-		args = append(args, "--config", c.configPath)
+	if c.store.Path() != "" {
+		args = append(args, "--config", c.store.Path())
 	}
 	if c.envPath != "" {
 		args = append(args, "--env-file", c.envPath)
@@ -115,7 +118,7 @@ func (c *controller) start() error {
 	c.mu.Lock()
 	c.child = nil
 	c.mu.Unlock()
-	return fmt.Errorf("serve started but did not bind %s", c.cfg.Listen)
+	return fmt.Errorf("serve started but did not bind %s", c.snap().Listen)
 }
 
 func (c *controller) stop() error {
@@ -141,12 +144,12 @@ func (c *controller) stop() error {
 		return nil
 	}
 
-	pid, name, err := listenerPID(listenPort(c.cfg.Listen))
+	pid, name, err := listenerPID(listenPort(c.snap().Listen))
 	if err != nil {
 		return err
 	}
 	if pid == 0 {
-		return fmt.Errorf("nothing listening on %s", c.cfg.Listen)
+		return fmt.Errorf("nothing listening on %s", c.snap().Listen)
 	}
 	if name != "" && !strings.Contains(strings.ToLower(name), "local-llm") {
 		return fmt.Errorf("port is held by %s (pid %d), not local-llm", name, pid)
