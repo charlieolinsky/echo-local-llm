@@ -18,7 +18,9 @@ Cost: **$0** (Homebrew, Go, Ollama, open weights).
 
 ```bash
 ./scripts/setup.sh   # install Ollama if needed, build, pull tiny model, create .env
-make run             # start gateway on 0.0.0.0:4000
+make tui             # dashboard: start/stop gateway, live request log
+# or headless:
+make run             # gateway only on 0.0.0.0:4000
 ```
 
 In another terminal (key is in `.env`):
@@ -56,11 +58,27 @@ OpenAI SDKs: set `base_url` / `baseURL` to `http://<mac-ip>:4000/v1` and `api_ke
 |---------|---------|
 | `make setup` / `./scripts/setup.sh` | Bootstrap deps, key, tiny model, binary |
 | `make build` | Build `bin/local-llm` |
-| `make run` | Serve gateway |
+| `make tui` | Dashboard — start/stop gateway, live logs |
+| `make run` | Headless gateway (LAN / launchd) |
 | `make status` | Probe `/health` |
+| `make allow-firewall` | Allow LAN access through macOS firewall |
 | `make install-launchd` | Start at login (KeepAlive) |
 | `make uninstall-launchd` | Remove login agent |
 | `./bin/local-llm version` | Print version |
+
+### TUI keys
+
+The dashboard does **not** start the gateway until you press space. Quitting the TUI leaves a started gateway running.
+
+| Key | Action |
+|-----|--------|
+| `space` | Start or stop the gateway |
+| `tab` | Logs ↔ optional test chat |
+| `f` | Toggle log follow |
+| `k` | Reveal / hide API key |
+| `q` / `ctrl+c` | Quit the dashboard |
+
+Activity is also written to `~/Library/Logs/local-llm.log`.
 
 ## Add another model config
 

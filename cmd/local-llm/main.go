@@ -14,6 +14,7 @@ import (
 
 	"github.com/charlesolinsky/local-llm/internal/config"
 	"github.com/charlesolinsky/local-llm/internal/server"
+	"github.com/charlesolinsky/local-llm/internal/tui"
 )
 
 var version = "0.1.0"
@@ -27,6 +28,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		os.Exit(runServe(os.Args[2:]))
+	case "tui", "ui":
+		os.Exit(runTUI(os.Args[2:]))
 	case "status":
 		os.Exit(runStatus(os.Args[2:]))
 	case "version":
@@ -45,12 +48,39 @@ func printUsage() {
 
 Usage:
   local-llm serve  [--config path] [--env-file path]
+  local-llm tui    [--config path] [--env-file path]
   local-llm status [--config path] [--env-file path]
   local-llm version
+
+  tui (alias: ui)  Dashboard: start/stop gateway, live logs, optional test chat
+  serve            Headless gateway for LAN / launchd
 
 Environment:
   LOCAL_LLM_API_KEY   Required bearer token for /v1 requests
 `)
+}
+
+func runTUI(args []string) int {
+	fs := flag.NewFlagSet("tui", flag.ExitOnError)
+	cfgPath := fs.String("config", defaultConfigPath(), "path to models.yaml")
+	envFile := fs.String("env-file", defaultEnvPath(), "optional .env file to load")
+	_ = fs.Parse(args)
+
+	if err := loadEnvFile(*envFile); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		return 1
+	}
+
+	if err := tui.Run(cfg, *cfgPath, *envFile); err != nil {
+		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runServe(args []string) int {

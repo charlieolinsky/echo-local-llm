@@ -3,7 +3,7 @@ BIN := bin/$(APP)
 CONFIG := config/models.yaml
 ENV_FILE := .env
 
-.PHONY: build run status test tidy setup allow-firewall install-launchd uninstall-launchd clean
+.PHONY: build run tui status test tidy setup allow-firewall install-launchd uninstall-launchd clean
 
 build:
 	mkdir -p bin
@@ -12,6 +12,9 @@ build:
 
 run: build
 	./$(BIN) serve --config $(CONFIG) --env-file $(ENV_FILE)
+
+tui: build
+	./$(BIN) tui --config $(CONFIG) --env-file $(ENV_FILE)
 
 status: build
 	./$(BIN) status --config $(CONFIG) --env-file $(ENV_FILE)

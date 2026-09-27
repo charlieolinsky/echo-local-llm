@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -38,7 +37,6 @@ func New(cfg *config.Config) (*Gateway, error) {
 		req.Header.Set("Host", target.Host)
 	}
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("upstream error: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"error":{"message":"ollama upstream unavailable","type":"server_error","code":"upstream_error"}}`))
