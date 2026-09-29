@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charlesolinsky/local-llm/internal/config"
@@ -20,6 +21,27 @@ type Gateway struct {
 	store  *config.Store
 	proxy  *httputil.ReverseProxy
 	client *http.Client
+
+	mu   sync.Mutex
+	busy bool
+}
+
+// acquireChat allows one completion at a time. A second caller is turned away
+// so Ollama is not asked to run two generations on this machine.
+func (g *Gateway) acquireChat() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.busy {
+		return false
+	}
+	g.busy = true
+	return true
+}
+
+func (g *Gateway) releaseChat() {
+	g.mu.Lock()
+	g.busy = false
+	g.mu.Unlock()
 }
 
 func (g *Gateway) cfg() config.Config {

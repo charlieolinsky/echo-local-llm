@@ -10,8 +10,12 @@ import (
 )
 
 // ModelEntry maps a public alias to an Ollama upstream model tag.
+// NumCtx and NumPredict, when set, override the gateway-wide context length
+// and the unbounded completion default for this alias only.
 type ModelEntry struct {
-	Upstream string `yaml:"upstream"`
+	Upstream   string `yaml:"upstream"`
+	NumCtx     int    `yaml:"num_ctx,omitempty"`
+	NumPredict int    `yaml:"num_predict,omitempty"`
 }
 
 // Config is the gateway configuration loaded from YAML + environment.
@@ -87,22 +91,32 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// Resolve returns the Ollama upstream tag for a client-facing model name.
+// Lookup returns the alias entry for a client-facing model name.
 // Empty, "default", and "active" map to the configured active alias.
-func (c Config) Resolve(name string) (string, bool) {
+// A raw upstream tag matches the first alias that uses it.
+func (c Config) Lookup(name string) (ModelEntry, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" || name == "default" || name == "active" {
 		name = c.Active
 	}
 	if entry, ok := c.Models[name]; ok {
-		return entry.Upstream, true
+		return entry, true
 	}
 	for _, entry := range c.Models {
 		if entry.Upstream == name {
-			return entry.Upstream, true
+			return entry, true
 		}
 	}
-	return "", false
+	return ModelEntry{}, false
+}
+
+// Resolve returns the Ollama upstream tag for a client-facing model name.
+func (c Config) Resolve(name string) (string, bool) {
+	entry, ok := c.Lookup(name)
+	if !ok {
+		return "", false
+	}
+	return entry.Upstream, true
 }
 
 // AliasNames returns configured alias names in sorted order.

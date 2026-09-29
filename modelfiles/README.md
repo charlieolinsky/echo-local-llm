@@ -10,6 +10,16 @@ ollama create summarize -f modelfiles/summarize.Modelfile
 
 Wired in `config/models.yaml` as alias `summarize` (same Qwen 3.5 9B weights, summarization system prompt).
 
+## Included: `echo`
+
+Echo briefing cards (JSON title, summary paragraphs, verbatim quotes). Same Qwen 3.5 9B weights as `chat`, with an 8k context and a 900-token completion cap.
+
+```bash
+ollama create echo -f modelfiles/echo.Modelfile
+```
+
+Wired in `config/models.yaml` as alias `echo`. Restart the gateway after creating the tag. Clients call `"model": "echo"`.
+
 ## Custom preset example
 
 ```bash
