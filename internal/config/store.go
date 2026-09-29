@@ -84,7 +84,12 @@ func (s *Store) UpsertModel(alias, upstream string) error {
 	if s.cfg.Models == nil {
 		s.cfg.Models = map[string]ModelEntry{}
 	}
-	s.cfg.Models[alias] = ModelEntry{Upstream: upstream}
+	prev := s.cfg.Models[alias]
+	s.cfg.Models[alias] = ModelEntry{
+		Upstream:   upstream,
+		NumCtx:     prev.NumCtx,
+		NumPredict: prev.NumPredict,
+	}
 	if s.cfg.Active == "" {
 		s.cfg.Active = alias
 	}

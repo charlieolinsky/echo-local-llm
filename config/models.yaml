@@ -6,6 +6,10 @@ context_length: 32768
 models:
     chat:
         upstream: qwen3.5:9b
+    echo:
+        upstream: echo
+        num_ctx: 8192
+        num_predict: 900
     code:
         upstream: qwen2.5-coder:7b
     summarize:

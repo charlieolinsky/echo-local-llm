@@ -57,6 +57,67 @@ models:
 	}
 }
 
+func TestLookupAliasLimits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.yaml")
+	content := `
+models:
+  echo:
+    upstream: "echo"
+    num_ctx: 8192
+    num_predict: 900
+  chat:
+    upstream: "qwen3.5:9b"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAPIKey, "test-secret-key")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := cfg.Lookup("echo")
+	if !ok || entry.Upstream != "echo" || entry.NumCtx != 8192 || entry.NumPredict != 900 {
+		t.Fatalf("lookup echo: %+v ok=%v", entry, ok)
+	}
+	chat, ok := cfg.Lookup("chat")
+	if !ok || chat.NumCtx != 0 || chat.NumPredict != 0 {
+		t.Fatalf("lookup chat: %+v", chat)
+	}
+}
+
+func TestUpsertKeepsAliasLimits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.yaml")
+	content := `
+models:
+  echo:
+    upstream: "echo"
+    num_ctx: 8192
+    num_predict: 900
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAPIKey, "test-secret-key")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertModel("echo", "echo"); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := st2.Snapshot().Models["echo"]
+	if entry.NumCtx != 8192 || entry.NumPredict != 900 {
+		t.Fatalf("limits dropped on upsert: %+v", entry)
+	}
+}
+
 func TestLoadRequiresAPIKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "models.yaml")

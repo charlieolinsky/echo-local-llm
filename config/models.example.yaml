@@ -14,6 +14,12 @@ models:
   chat:
     upstream: "qwen3.5:9b"
 
+  # Echo briefing cards. Create once: ollama create echo -f modelfiles/echo.Modelfile
+  echo:
+    upstream: "echo"
+    num_ctx: 8192
+    num_predict: 900
+
   summarize:
     upstream: "summarize"
 
