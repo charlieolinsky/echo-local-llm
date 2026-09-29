@@ -4,7 +4,7 @@
 listen: "0.0.0.0:4000"
 ollama_base: "http://127.0.0.1:11434"
 active: chat
-context_length: 8192
+context_length: 32768
 
 models:
   tiny:

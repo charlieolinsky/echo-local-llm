@@ -27,12 +27,14 @@ type Config struct {
 const (
 	DefaultListen     = "0.0.0.0:4000"
 	DefaultOllamaBase = "http://127.0.0.1:11434"
-	DefaultContext    = 8192
+	DefaultContext    = 32768
 	EnvAPIKey         = "LOCAL_LLM_API_KEY"
 )
 
 // ContextChoices is the TUI cycle for num_ctx.
-var ContextChoices = []int{2048, 4096, 8192, 16384}
+// On M4 16GB, 32k is a solid article-batch default; 64k still fits for qwen3.5:9b
+// with less headroom; 128k is possible but may swap under load.
+var ContextChoices = []int{8192, 16384, 32768, 65536, 131072}
 
 // Load reads a YAML config file and applies environment overrides.
 func Load(path string) (*Config, error) {

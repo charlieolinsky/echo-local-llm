@@ -1,25 +1,14 @@
-# Local LLM gateway configuration
-# Clients call the alias name (e.g. "tiny"); the gateway rewrites to Ollama's upstream tag.
-
-listen: "0.0.0.0:4000"
-ollama_base: "http://127.0.0.1:11434"
-
-# Alias served as "default" / "active" on the API (TUI can change this)
+# local-llm gateway — edited by the TUI; keep .env for the API key
+listen: 0.0.0.0:4000
+ollama_base: http://127.0.0.1:11434
 active: chat
-context_length: 8192
-
-# Prefer LOCAL_LLM_API_KEY in .env over putting a key here.
-# api_key: ""
-
+context_length: 32768
 models:
-  # Smoke / tiny — fast, weak, good for plumbing tests
-  tiny:
-    upstream: "smollm2:135m"
-
-  # Daily driver on M4 16GB — summarization, reasoning, general chat (~7GB)
-  chat:
-    upstream: "qwen3.5:9b"
-
-  # Same weights with a summarization-oriented system prompt (created via Modelfile)
-  summarize:
-    upstream: "summarize"
+    chat:
+        upstream: qwen3.5:9b
+    code:
+        upstream: qwen2.5-coder:7b
+    summarize:
+        upstream: summarize
+    tiny:
+        upstream: smollm2:135m
