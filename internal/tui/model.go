@@ -50,6 +50,7 @@ type model struct {
 	logView  viewport.Model
 	logText  string
 	logSize  int64
+	logFloor int64 // -1 = tail whole file; >=0 = only bytes after this offset
 	follow   bool
 	listView viewport.Model
 
@@ -107,6 +108,7 @@ func newModel(store *config.Store, ctrl *controller) model {
 		panel:      panelLogs,
 		aliasNames: cfg.AliasNames(),
 		lib:        config.LoadLibrary(store.Path()),
+		logFloor:   -1,
 		follow:     true,
 		input:      ti,
 		spinner:    sp,
@@ -118,23 +120,29 @@ func newModel(store *config.Store, ctrl *controller) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(takeSnapshot(m.ctrl), scheduleTick(), textinput.Blink)
+	return tea.Batch(takeSnapshot(m.ctrl, m.logFloor), scheduleTick(), textinput.Blink)
 }
 
 func scheduleTick() tea.Cmd {
 	return tea.Tick(750*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
-func takeSnapshot(ctrl *controller) tea.Cmd {
+func takeSnapshot(ctrl *controller, logFloor int64) tea.Cmd {
 	return func() tea.Msg {
-		logs, _ := activity.TailFile(activity.DefaultPath(), 48<<10)
+		path := activity.DefaultPath()
+		var logs string
+		if logFloor >= 0 {
+			logs, _ = activity.ReadSince(path, logFloor, 48<<10)
+		} else {
+			logs, _ = activity.TailFile(path, 48<<10)
+		}
 		tags, _ := listOllamaTags(ctrl.snap().OllamaBase)
 		return snapshotMsg{
 			gateway:   ctrl.gatewayUp(),
 			ollama:    ctrl.ollamaUp(),
 			owned:     ctrl.owned(),
 			logs:      logs,
-			size:      activity.FileSize(activity.DefaultPath()),
+			size:      activity.FileSize(path),
 			installed: tags,
 		}
 	}
@@ -175,7 +183,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case tickMsg:
-		return m, tea.Batch(takeSnapshot(m.ctrl), scheduleTick())
+		return m, tea.Batch(takeSnapshot(m.ctrl, m.logFloor), scheduleTick())
 
 	case snapshotMsg:
 		changed := msg.gateway != m.gatewayUp || msg.ollama != m.ollamaUp ||
@@ -221,14 +229,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "ready"
 		}
 		m.aliasNames = m.store.Snapshot().AliasNames()
-		return m, takeSnapshot(m.ctrl)
+		return m, takeSnapshot(m.ctrl, m.logFloor)
 
 	case toggleDoneMsg:
 		m.busy = false
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.note(msg.err.Error())
-			return m, takeSnapshot(m.ctrl)
+			return m, takeSnapshot(m.ctrl, m.logFloor)
 		}
 		if msg.started {
 			m.status = "running"
@@ -237,7 +245,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "stopped"
 			m.note("gateway stopped")
 		}
-		return m, takeSnapshot(m.ctrl)
+		return m, takeSnapshot(m.ctrl, m.logFloor)
 
 	case chatResultMsg:
 		m.sending = false
@@ -350,6 +358,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+	case "c", "C":
+		if !typing {
+			m.clearLogs()
+			return m, nil
+		}
 	case "up":
 		if m.panel == panelModels && len(m.rows) > 0 {
 			m.rowIdx--
@@ -454,6 +467,13 @@ func (m *model) note(s string) {
 	if len(m.notices) > 20 {
 		m.notices = m.notices[len(m.notices)-20:]
 	}
+	m.redrawLogs()
+}
+
+func (m *model) clearLogs() {
+	m.logFloor = m.logSize
+	m.logText = ""
+	m.notices = nil
 	m.redrawLogs()
 }
 
@@ -721,7 +741,7 @@ func (m model) renderLibrary(inner int) string {
 }
 
 func (m model) renderHelp(inner int) string {
-	help := "space start/stop   tab/1–3 pane   f follow   k key   q quit"
+	help := "space start/stop   tab/1–3 pane   f follow   c clear   k key   q quit"
 	switch m.panel {
 	case panelModels:
 		help = "↑↓ move   enter active   i install   x remove   [ ] ctx   tab pane"

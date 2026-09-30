@@ -58,10 +58,42 @@ func TestViewRendersDashboard(t *testing.T) {
 		"logs",
 		"models",
 		"space start/stop",
+		"c clear",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q\n%s", want, view)
 		}
+	}
+}
+
+func TestClearLogsHidesVisibleLines(t *testing.T) {
+	st := testStore(t)
+	m := newModel(st, newController(st, ""))
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = updated.(model)
+	m.logText = "15:04:05  200  POST /v1/chat/completions  12ms  127.0.0.1  tiny"
+	m.logSize = 64
+	m.note("gateway started")
+	m.redrawLogs()
+	view := m.View()
+	if !strings.Contains(view, "POST /v1/chat/completions") {
+		t.Fatalf("expected log line before clear\n%s", view)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(model)
+	view = m.View()
+	if strings.Contains(view, "POST /v1/chat/completions") {
+		t.Fatalf("log line still visible after clear\n%s", view)
+	}
+	if strings.Contains(view, "gateway started") {
+		t.Fatalf("notice still visible after clear\n%s", view)
+	}
+	if m.logFloor != 64 {
+		t.Fatalf("logFloor=%d want 64", m.logFloor)
+	}
+	if !strings.Contains(view, "No activity yet") {
+		t.Fatalf("expected empty-state hint after clear\n%s", view)
 	}
 }
 
