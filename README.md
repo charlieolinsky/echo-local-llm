@@ -80,6 +80,7 @@ The dashboard does **not** start the gateway until you press space. Quitting the
 | `x` | Uninstall |
 | `[` `]` | Context length (2k–16k) |
 | `f` | Toggle log follow |
+| `c` | Clear visible logs |
 | `k` | Reveal / hide API key |
 | `q` / `ctrl+c` | Quit the dashboard |
 
